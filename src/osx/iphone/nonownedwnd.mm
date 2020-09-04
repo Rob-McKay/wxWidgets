@@ -16,6 +16,8 @@
 #include "wx/frame.h"
 #include <algorithm>
 
+// Note: Assumes iOS 7 or later
+
 CGRect wxToNSRect(UIView* parent, const wxRect& r )
 {
     CGRect frame = parent ? [parent bounds] : [[UIScreen mainScreen] bounds];
@@ -279,18 +281,51 @@ void wxNonOwnedWindowIPhoneImpl::Maximize(bool maximize)
     }
 }
 
+static UIViewController* FindViewController(UIWindow* toplevelwindow)
+{
+    if ([toplevelwindow respondsToSelector:@selector(setRootViewController:)])
+    {
+        return toplevelwindow.rootViewController;
+    }
+    else
+    {
+        // TODO: Find the subview which corresponds to the content view and read the view controller
+        return NULL;
+    }
+}
+
 bool wxNonOwnedWindowIPhoneImpl::IsFullScreen() const
 {
-    return m_macFullScreenData != NULL ;
+    UIViewController* controller = FindViewController(GetWXWindow());
+
+    if (controller == NULL) // controller not found
+    {
+        return false;
+    }
+
+    return controller.edgesForExtendedLayout == UIRectEdgeAll;
 }
 
 bool wxNonOwnedWindowIPhoneImpl::EnableFullScreenView(bool WXUNUSED(enable))
 {
+    // TODO: What should this function do on iOS since iOS does not have a title bar.
     return true;
 }
 
-bool wxNonOwnedWindowIPhoneImpl::ShowFullScreen(bool show, long style)
+bool wxNonOwnedWindowIPhoneImpl::ShowFullScreen(bool fullscreen, long style)
 {
+    UIViewController* controller = FindViewController(GetWXWindow());
+
+    if (controller == NULL) // controller not found
+    {
+        return false;
+    }
+
+    controller.edgesForExtendedLayout = (fullscreen)? UIRectEdgeAll : UIRectEdgeNone;
+
+    if (fullscreen)
+        return Show(true);
+
     return true;
 }
 
@@ -338,16 +373,20 @@ wxWidgetImpl* wxWidgetImpl::CreateContentView( wxNonOwnedWindow* now )
 {
     UIWindow* toplevelwindow = now->GetWXWindow();
     CGRect frame = [toplevelwindow bounds];
+
+#if defined __IPHONE_9_0
+    CGRect appframe = [[UIScreen mainScreen] bounds];
+#else
     CGRect appframe = [[UIScreen mainScreen] applicationFrame];
-    BOOL fullscreen = now->GetWindowStyle() == wxDEFAULT_FRAME_STYLE && [[UIApplication sharedApplication] statusBarStyle] == UIStatusBarStyleBlackTranslucent;
+#endif
+
+    BOOL fullscreen = (now->GetWindowStyle() == wxDEFAULT_FRAME_STYLE) && ([[UIApplication sharedApplication] statusBarStyle] == UIStatusBarStyleLightContent);
 
     wxUIContentView* contentview = [[wxUIContentView alloc] initWithFrame:( fullscreen ? frame : appframe ) ];
     contentview.autoresizingMask = UIViewAutoresizingFlexibleWidth | UIViewAutoresizingFlexibleHeight;
     wxUIContentViewController* controller = [[wxUIContentViewController alloc] initWithNibName:nil bundle:nil];
 
-#ifdef __IPHONE_3_0
-    controller.wantsFullScreenLayout = fullscreen;
-#endif
+    controller.edgesForExtendedLayout = (fullscreen)? UIRectEdgeAll : UIRectEdgeNone;
 
     controller.view = contentview;
     [contentview release];
